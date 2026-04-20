@@ -22,11 +22,9 @@ own_channels:
     topic: "Alice — AI avatar / Tango live streaming content"
     language: "ru"
     target_audience: "Tango Live viewers and AI-avatar curious audience"
-    goals: [grow_subscribers]
+    goals: [grow_subscribers, increase_engagement]
     discussion_group: null
-    # Promoter account is NOT an admin of @AliceTango, so the agent can only
-    # mention it from other channels / cross-post / propose mutual PR — not post into it.
-    can_post: false
+    can_post: true
 
 policy:
   max_own_channel_posts_per_day: 3
