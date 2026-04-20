@@ -1,0 +1,63 @@
+# tg-promo-agent config
+# Copy to config.yaml (gitignored) or mount via Railway volume.
+
+# Your own Telegram channels the agent is allowed to promote.
+# Each must have the promoter user as admin (for posting / checking analytics).
+own_channels:
+  - username: "your_channel_1"          # @your_channel_1
+    topic: "crypto news and alpha"
+    language: "ru"
+    target_audience: "crypto traders 20-40, RU-speaking"
+    goals:
+      - grow_subscribers
+      - increase_engagement
+    # Optional discussion group linked to the channel (where comments land)
+    discussion_group: null
+  - username: "your_channel_2"
+    topic: "AI tools and productivity"
+    language: "en"
+    target_audience: "founders, indie hackers"
+    goals: [grow_subscribers]
+    discussion_group: null
+
+# Anti-spam / safety policy (hard caps per rolling 24h window).
+policy:
+  max_own_channel_posts_per_day: 6          # per channel
+  max_comments_per_day: 20                   # across all foreign channels
+  max_dms_per_day: 10                        # mutual-PR outreach
+  min_minutes_between_same_tool: 15
+  min_minutes_between_same_foreign_channel: 240
+  comment_blacklist_keywords:                # never comment if foreign channel msg contains
+    - "ad"
+    - "реклама"
+    - "scam"
+  forbidden_phrases_in_generated_content:    # strip if LLM generates any of these
+    - "click here now"
+    - "гарантированный доход"
+  require_human_approval_for:
+    - dm_channel_owner                       # set true if you want manual greenlight
+
+# Foreign channels the agent is allowed to comment in (whitelist).
+# Leave empty to disable commenting. Agent may NEVER comment outside this list.
+allowed_foreign_channels: []
+  # - "@some_public_channel"
+  # - "@another_channel"
+
+# Cross-posting: where else to promote TG channels.
+cross_post:
+  twitter:
+    enabled: false
+  reddit:
+    enabled: false
+    subreddits: []   # e.g. ["r/cryptocurrency"]
+  vk:
+    enabled: false
+    group_ids: []
+
+# TGStat search defaults for mutual-PR discovery.
+similar_search:
+  min_subscribers: 1000
+  max_subscribers: 50000
+  languages: ["ru", "en"]
+  # Exclude channels whose owner we've already DM'd in the last N days
+  dm_cooldown_days: 30
