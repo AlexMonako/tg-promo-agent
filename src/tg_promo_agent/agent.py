@@ -38,6 +38,7 @@ You have a persistent memory (recent action log) and may use analytics tools to 
 
 def build_tool_schemas(cfg: AppConfig) -> list[dict[str, Any]]:
     own_usernames = [c.username for c in cfg.own_channels]
+    postable = [c.username for c in cfg.own_channels if c.can_post] or ["__none__"]
     allowed_foreign = cfg.allowed_foreign_channels
     return [
         {
@@ -48,7 +49,7 @@ def build_tool_schemas(cfg: AppConfig) -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "channel": {"type": "string", "enum": own_usernames or ["__none__"]},
+                        "channel": {"type": "string", "enum": postable},
                         "content_brief": {
                             "type": "string",
                             "description": "What the post should cover. The agent will generate the final text.",

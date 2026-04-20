@@ -18,4 +18,4 @@ data/
 .mypy_cache/
 dist/
 build/
-config.yaml
+# config.yaml is committed — it contains channel metadata (non-sensitive)

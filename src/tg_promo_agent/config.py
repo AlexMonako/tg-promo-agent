@@ -17,6 +17,9 @@ class OwnChannel(BaseModel):
     target_audience: str = ""
     goals: list[str] = Field(default_factory=list)
     discussion_group: str | None = None
+    # If False, the agent cannot use tg_post_own_channel on this channel
+    # (e.g. we don't own it; we only mention it via cross-posts / mutual PR).
+    can_post: bool = True
 
 
 class Policy(BaseModel):
