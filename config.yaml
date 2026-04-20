@@ -1,0 +1,64 @@
+# tg-promo-agent production config for AlexMonako.
+# Non-sensitive — safe to commit. Railway picks this up via Dockerfile COPY.
+
+own_channels:
+  - username: "ready_player_vr"
+    topic: "Ready Player One — VR, metaverse, immersive tech"
+    language: "ru"
+    target_audience: "VR enthusiasts, metaverse and crypto-gaming audience, RU-speaking"
+    goals: [grow_subscribers, increase_engagement]
+    discussion_group: null
+    can_post: true
+
+  - username: "aiatrtools"
+    topic: "AI art tools — video and image generation with neural networks"
+    language: "ru"
+    target_audience: "creators, designers, AI-art hobbyists, RU-speaking"
+    goals: [grow_subscribers, increase_engagement]
+    discussion_group: null
+    can_post: true
+
+  - username: "AliceTango"
+    topic: "Alice — AI avatar / Tango live streaming content"
+    language: "ru"
+    target_audience: "Tango Live viewers and AI-avatar curious audience"
+    goals: [grow_subscribers]
+    discussion_group: null
+    # Promoter account is NOT an admin of @AliceTango, so the agent can only
+    # mention it from other channels / cross-post / propose mutual PR — not post into it.
+    can_post: false
+
+policy:
+  max_own_channel_posts_per_day: 3
+  max_comments_per_day: 15
+  max_dms_per_day: 5
+  min_minutes_between_same_tool: 30
+  min_minutes_between_same_foreign_channel: 360
+  comment_blacklist_keywords:
+    - "реклама"
+    - "scam"
+    - "#ad"
+  forbidden_phrases_in_generated_content:
+    - "гарантированный доход"
+    - "click here now"
+    - "100% profit"
+  require_human_approval_for: []
+
+# Start empty — agent cannot comment anywhere until you whitelist channels.
+allowed_foreign_channels: []
+
+cross_post:
+  twitter:
+    enabled: false
+  reddit:
+    enabled: false
+    subreddits: []
+  vk:
+    enabled: false
+    group_ids: []
+
+similar_search:
+  min_subscribers: 500
+  max_subscribers: 50000
+  languages: ["ru", "en"]
+  dm_cooldown_days: 30

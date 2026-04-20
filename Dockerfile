@@ -22,8 +22,7 @@ ENV STATE_DB_PATH=/data/state.sqlite3 \
     CONFIG_PATH=/app/config.yaml \
     PORT=8080
 
-# Default config is shipped but should be overridden via volume mount.
-COPY config.example.yaml /app/config.yaml
+COPY config.yaml /app/config.yaml
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
