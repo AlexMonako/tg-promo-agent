@@ -98,3 +98,28 @@ def test_build_tool_schemas_hides_post_when_no_postable():
     # Agent can still dm and noop
     assert "tg_dm_channel_owner" in names
     assert "noop" in names
+
+
+def test_target_for_tool_dm_uses_owner_username():
+    from tg_promo_agent.agent import Agent
+    args = {
+        "owner_username": "alice",
+        "their_channel": "alice_channel",
+        "our_channel": "ours",
+        "message_brief": "hi",
+        "rationale": "r",
+    }
+    # DM target must be the recipient, not our own channel.
+    assert Agent._target_for_tool("tg_dm_channel_owner", args) == "alice"
+
+
+def test_target_for_tool_cross_post_uses_platform():
+    from tg_promo_agent.agent import Agent
+    args = {"platform": "reddit", "our_channel": "ours", "content_brief": "x", "rationale": "r"}
+    assert Agent._target_for_tool("cross_post", args) == "reddit"
+
+
+def test_target_for_tool_post_uses_channel():
+    from tg_promo_agent.agent import Agent
+    args = {"channel": "mine", "content_brief": "x", "rationale": "r"}
+    assert Agent._target_for_tool("tg_post_own_channel", args) == "mine"

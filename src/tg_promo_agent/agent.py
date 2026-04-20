@@ -262,14 +262,19 @@ class Agent:
         ]
 
         schemas = build_tool_schemas(self.cfg)
-        # Hide tools that are currently on cooldown or over daily cap so the
-        # planner can't waste a tick choosing them (noop always stays).
+        # Hide tools that are currently on cooldown, over daily cap, or gated
+        # behind `require_human_approval_for` so the planner can't waste a
+        # tick choosing them (noop always stays).
         on_cooldown = {t for t, m in snap["cooldowns_min"].items() if m > 0}
         over_cap = {
             t for t, cap in snap["daily_caps"].items()
             if snap["daily_usage"].get(t, 0) >= cap
         }
-        blocked_tools = (on_cooldown | over_cap) - {"noop"}
+        gated = set(self.cfg.policy.require_human_approval_for)
+        # Legacy alias: allow `dm_channel_owner` to gate `tg_dm_channel_owner`.
+        if "dm_channel_owner" in gated:
+            gated.add("tg_dm_channel_owner")
+        blocked_tools = (on_cooldown | over_cap | gated) - {"noop"}
         schemas = [
             s for s in schemas
             if s["function"]["name"] not in blocked_tools
@@ -303,18 +308,32 @@ class Agent:
         call = tool_calls[0]
         await self._dispatch(call["name"], call["args"])
 
+    @staticmethod
+    def _target_for_tool(name: str, args: dict[str, Any]) -> str | None:
+        """Pick the arg that identifies the *subject* of this tool call.
+
+        For DMs this must be `owner_username` (the recipient) — not `our_channel`
+        — otherwise the per-owner DM cooldown looks up the wrong key and we can
+        spam the same owner. For cross-posts the subject is the platform.
+        """
+        if name == "tg_dm_channel_owner":
+            return args.get("owner_username")
+        if name == "cross_post":
+            return args.get("platform")
+        return (
+            args.get("channel")
+            or args.get("our_channel")
+            or args.get("owner_username")
+            or args.get("platform")
+        )
+
     async def _dispatch(self, name: str, args: dict[str, Any]) -> None:
         handler = getattr(self, f"_do_{name}", None)
         if handler is None:
             log.warning("agent.unknown_tool", tool=name, args=args)
             return
 
-        target = (
-            args.get("channel")
-            or args.get("our_channel")
-            or args.get("owner_username")
-            or args.get("platform")
-        )
+        target = self._target_for_tool(name, args)
         decision = await self.policy.check(name, target)
         if not decision.allowed:
             log.info("agent.blocked_by_policy", tool=name, reason=decision.reason)
