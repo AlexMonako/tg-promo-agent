@@ -40,7 +40,10 @@ policy:
     - "гарантированный доход"
     - "click here now"
     - "100% profit"
-  require_human_approval_for: []
+  # DMs disabled until a curated DM-target whitelist is added (otherwise LLM may
+  # hallucinate a random username like @meta_llama). Re-enable when ready.
+  require_human_approval_for:
+    - tg_dm_channel_owner
 
 # Start empty — agent cannot comment anywhere until you whitelist channels.
 allowed_foreign_channels: []
