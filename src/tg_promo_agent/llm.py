@@ -70,7 +70,7 @@ class GroqPlanner:
             ],
             tools=tools,
             tool_choice="auto",
-            max_tokens=1024,
+            max_tokens=512,
         )
         msg = resp.choices[0].message
         calls = getattr(msg, "tool_calls", None) or []
