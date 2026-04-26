@@ -204,7 +204,11 @@ class Agent:
         self.cfg = cfg
         self.store = StateStore(cfg.state_db_path)
         self.policy = PolicyEngine(cfg, self.store)
-        self.llm = GroqPlanner(cfg.groq_api_key, cfg.groq_model)
+        self.llm = GroqPlanner(
+            cfg.groq_api_key,
+            cfg.groq_model,
+            planner_model=cfg.groq_planner_model,
+        )
         self.tg = TelegramTools(cfg.telegram_api_id, cfg.telegram_api_hash, cfg.telegram_session_string)
         self.tgstat = TGStatTools(cfg.tgstat_token)
         self._stop = asyncio.Event()

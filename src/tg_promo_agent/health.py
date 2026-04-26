@@ -28,6 +28,7 @@ def build_app(agent: Agent) -> FastAPI:
             "allowed_foreign_channels": cfg.allowed_foreign_channels,
             "agent_tick_seconds": cfg.agent_tick_seconds,
             "groq_model": cfg.groq_model,
+            "groq_planner_model": cfg.groq_planner_model,
             "tgstat_enabled": bool(cfg.tgstat_token),
         }
 
