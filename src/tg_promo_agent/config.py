@@ -72,7 +72,11 @@ class AppConfig(BaseModel):
     telegram_api_hash: str = ""
     telegram_session_string: str = ""
     groq_api_key: str = ""
+    # Used for content generation (post bodies, comments) where quality matters.
     groq_model: str = "llama-3.3-70b-versatile"
+    # Used for the per-tick tool-selection planner. The 8b model has ~3x higher
+    # TPM on Groq's free tier and is plenty for picking one of ~7 tools.
+    groq_planner_model: str = "llama-3.1-8b-instant"
     tgstat_token: str = ""
     agent_tick_seconds: int = 600
     dry_run: bool = True
@@ -99,6 +103,7 @@ def load_config() -> AppConfig:
     raw["telegram_session_string"] = os.getenv("TELEGRAM_SESSION_STRING") or ""
     raw["groq_api_key"] = os.getenv("GROQ_API_KEY") or ""
     raw["groq_model"] = os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"
+    raw["groq_planner_model"] = os.getenv("GROQ_PLANNER_MODEL") or "llama-3.1-8b-instant"
     raw["tgstat_token"] = os.getenv("TGSTAT_TOKEN") or ""
     raw["agent_tick_seconds"] = int(os.getenv("AGENT_TICK_SECONDS") or 600)
     raw["dry_run"] = _env_bool("DRY_RUN", True)
