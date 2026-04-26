@@ -72,7 +72,7 @@ class AppConfig(BaseModel):
     telegram_api_hash: str = ""
     telegram_session_string: str = ""
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "llama-3.1-8b-instant"
     tgstat_token: str = ""
     agent_tick_seconds: int = 600
     dry_run: bool = True
@@ -98,7 +98,7 @@ def load_config() -> AppConfig:
     raw["telegram_api_hash"] = os.getenv("TELEGRAM_API_HASH") or ""
     raw["telegram_session_string"] = os.getenv("TELEGRAM_SESSION_STRING") or ""
     raw["groq_api_key"] = os.getenv("GROQ_API_KEY") or ""
-    raw["groq_model"] = os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"
+    raw["groq_model"] = os.getenv("GROQ_MODEL") or "llama-3.1-8b-instant"
     raw["tgstat_token"] = os.getenv("TGSTAT_TOKEN") or ""
     raw["agent_tick_seconds"] = int(os.getenv("AGENT_TICK_SECONDS") or 600)
     raw["dry_run"] = _env_bool("DRY_RUN", True)

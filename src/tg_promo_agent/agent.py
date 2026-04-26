@@ -306,6 +306,7 @@ class Agent:
             return
 
         call = tool_calls[0]
+        await asyncio.sleep(1.0)  # brief pause to avoid back-to-back 429s
         await self._dispatch(call["name"], call["args"])
 
     @staticmethod
