@@ -45,8 +45,22 @@ policy:
   require_human_approval_for:
     - tg_dm_channel_owner
 
-# Start empty — agent cannot comment anywhere until you whitelist channels.
-allowed_foreign_channels: []
+# Foreign channels the agent is allowed to comment under.
+# STARTER LIST — verify each one is alive + has comments enabled before trusting.
+# Niches: AI image/video generation + VR (RU). Remove any that turn out to be
+# inactive, off-topic, or spammy after a day of dry-run observation.
+allowed_foreign_channels:
+  # AI / нейросети (RU)
+  - "denissexy"
+  - "cgevent"
+  - "neural"
+  - "ai_newz"
+  - "bogdanisssimo"
+  - "nn_for_science"
+  # VR / XR (RU)
+  - "vrgeek"
+  - "xrtoday_ru"
+  - "vr_chat_ru"
 
 cross_post:
   twitter:
