@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import random
+import time
 from typing import Any
 
 import structlog
@@ -200,6 +201,18 @@ def build_tool_schemas(cfg: AppConfig) -> list[dict[str, Any]]:
 
 
 class Agent:
+    # How long to trust a fetched-recent-messages result for a foreign channel
+    # before re-fetching. 30 minutes is short enough that the LLM still sees
+    # fresh posts, long enough to keep TG API calls modest (~2x per channel
+    # per hour at default 10-min ticks).
+    FOREIGN_MSG_CACHE_TTL_S: float = 1800.0
+    # If a fetch fails (channel inaccessible / empty), retry sooner than the
+    # full TTL — but not on every tick, to avoid hammering a dead channel.
+    FOREIGN_MSG_FAIL_BACKOFF_S: float = 300.0
+    # How many recent messages to expose per channel. Enough variety for the
+    # LLM to pick a relevant one, small enough to keep prompt size sane.
+    FOREIGN_MSG_LIMIT: int = 5
+
     def __init__(self, cfg: AppConfig) -> None:
         self.cfg = cfg
         self.store = StateStore(cfg.state_db_path)
@@ -209,10 +222,95 @@ class Agent:
         self.tgstat = TGStatTools(cfg.tgstat_token)
         self._stop = asyncio.Event()
         self._last_status: dict[str, Any] = {"state": "starting"}
+        # channel -> (fetched_at_monotonic, [posts]). posts is a list of
+        # {"id": int, "date": str|None, "text": str}. Empty list means we
+        # tried and got nothing; entry still cached to back off retries.
+        self._foreign_msg_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
     @property
     def status(self) -> dict[str, Any]:
         return self._last_status
+
+    async def _refresh_foreign_messages(self) -> dict[str, list[dict[str, Any]]]:
+        """Fetch (or return cached) recent posts for each whitelisted foreign channel.
+
+        Returns a `{channel: [post, ...]}` map where each post is the raw dict
+        produced by `TelegramTools.fetch_recent_messages` (`id`, `date`, `text`).
+        Used so the LLM sees REAL message_ids instead of inventing them. A
+        single dead channel never blocks the tick — its slot is just empty.
+        """
+        out: dict[str, list[dict[str, Any]]] = {}
+        now = time.monotonic()
+        for ch in self.cfg.allowed_foreign_channels:
+            cached = self._foreign_msg_cache.get(ch)
+            if cached is not None:
+                age = now - cached[0]
+                # Honor full TTL on success, shorter back-off on empty result.
+                ttl = self.FOREIGN_MSG_CACHE_TTL_S if cached[1] else self.FOREIGN_MSG_FAIL_BACKOFF_S
+                if age < ttl:
+                    out[ch] = cached[1]
+                    continue
+            try:
+                posts = await self.tg.fetch_recent_messages(ch, limit=self.FOREIGN_MSG_LIMIT)
+            except RuntimeError:
+                # TG client not connected (no creds in dev) — fail soft.
+                posts = []
+            except Exception as e:  # noqa: BLE001
+                log.warning("agent.fetch_recent_failed", channel=ch, error=str(e))
+                posts = []
+            self._foreign_msg_cache[ch] = (now, posts)
+            out[ch] = posts
+        return out
+
+    def _format_foreign_block(self, recent: dict[str, list[dict[str, Any]]]) -> str:
+        """Render the foreign-channel section of the planner prompt."""
+        if not recent:
+            return "(none — tg_comment is unavailable this tick)"
+        lines: list[str] = []
+        for ch, posts in recent.items():
+            lines.append(f"  @{ch}:")
+            if not posts:
+                lines.append("    (no recent posts fetched — channel inaccessible/empty; skip)")
+                continue
+            for p in posts:
+                preview = (p.get("text") or "").replace("\n", " ").strip()[:160]
+                if not preview:
+                    preview = "(no text body — likely media-only post; skip)"
+                lines.append(f"    [message_id={p['id']}] {preview}")
+        return "\n" + "\n".join(lines)
+
+    @staticmethod
+    def _validate_comment_message_id(
+        cache_entry: tuple[float, list[dict[str, Any]]] | None,
+        message_id: int,
+    ) -> dict[str, Any] | None:
+        """Return an error dict if this message_id was not in our recent fetch.
+
+        Returns None when the call should proceed. Used to fail-fast on LLM
+        hallucinations like `message_id=12345`. If we have no cache entry at
+        all, we don't reject — better to attempt and let Telegram report the
+        real error than to block on missing cache.
+        """
+        if cache_entry is None:
+            return None
+        _ts, posts = cache_entry
+        if not posts:
+            # We tried to fetch and got nothing. Don't try to comment in a
+            # channel where we can't even read messages.
+            return {
+                "ok": False,
+                "error": "no_recent_posts_known",
+                "rejected_id": message_id,
+            }
+        valid_ids = {int(p["id"]) for p in posts}
+        if message_id not in valid_ids:
+            return {
+                "ok": False,
+                "error": "hallucinated_message_id",
+                "rejected_id": message_id,
+                "valid_recent_ids": sorted(valid_ids),
+            }
+        return None
 
     async def start(self) -> None:
         await self.store.init()
@@ -282,10 +380,19 @@ class Agent:
         ]
         available_tool_names = [s["function"]["name"] for s in schemas]
 
+        # Only fetch recent posts when commenting is actually possible this
+        # tick — otherwise we'd waste TG API calls for a tool the planner
+        # can't even use.
+        foreign_recent: dict[str, list[dict[str, Any]]] = {}
+        if "tg_comment" in available_tool_names:
+            foreign_recent = await self._refresh_foreign_messages()
+        foreign_block = self._format_foreign_block(foreign_recent)
+
         user_prompt = (
             "Own channels:\n" + "\n".join(channel_lines) + "\n\n"
-            f"Allowed foreign channels for commenting: "
-            f"{self.cfg.allowed_foreign_channels or '[] (none allowed)'}\n\n"
+            "Foreign channels you may comment under "
+            "(use ONLY the message_id values listed below — do not invent IDs):"
+            f"{foreign_block}\n\n"
             f"Available tools this tick: {available_tool_names}\n"
             "Tools NOT in this list are disabled (missing config/credentials) — "
             "don't try to use them.\n\n"
@@ -296,6 +403,7 @@ class Agent:
             f"Dry-run mode: {self.cfg.dry_run}.\n"
             "Pick ONE best next action now. Prefer producing real content "
             "(`tg_post_own_channel`) over analytics when channels have few recent posts. "
+            "When using `tg_comment`, copy a real `message_id` from the list above. "
             "Use `noop` only if every useful tool is on cooldown or nothing is safe."
         )
 
@@ -386,6 +494,21 @@ class Agent:
         channel = args["channel"]
         message_id = int(args["message_id"])
         brief = args["comment_brief"]
+        # Hallucination guard: the planner sometimes invents IDs like 12345.
+        # If we have a recent fetch for this channel, the chosen ID must be
+        # one we actually saw — otherwise we'd reply to whatever random old
+        # post happens to share that ID (or fail with a confusing RPC error).
+        guard = self._validate_comment_message_id(
+            self._foreign_msg_cache.get(channel), message_id
+        )
+        if guard is not None:
+            log.warning(
+                "agent.comment_msg_id_rejected",
+                channel=channel,
+                rejected_id=message_id,
+                error=guard.get("error"),
+            )
+            return guard
         sys = "Write a single, respectful, value-adding comment. Max 2 sentences. No links."
         text = self.policy.sanitize_content(
             await self.llm.generate_text(sys, brief, max_tokens=200)

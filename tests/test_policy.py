@@ -123,3 +123,114 @@ def test_target_for_tool_post_uses_channel():
     from tg_promo_agent.agent import Agent
     args = {"channel": "mine", "content_brief": "x", "rationale": "r"}
     assert Agent._target_for_tool("tg_post_own_channel", args) == "mine"
+
+
+# --- message_id hallucination guard ----------------------------------------
+
+
+def test_validate_comment_msg_id_no_cache_passes():
+    from tg_promo_agent.agent import Agent
+    # No cache yet for this channel — don't reject; let TG report the real
+    # error if the id turns out to be invalid.
+    assert Agent._validate_comment_message_id(None, 12345) is None
+
+
+def test_validate_comment_msg_id_rejects_when_cache_empty():
+    from tg_promo_agent.agent import Agent
+    # We tried to fetch and got nothing → channel inaccessible. Reject so we
+    # don't waste a cooldown slot trying to comment somewhere we can't read.
+    res = Agent._validate_comment_message_id((123.0, []), 12345)
+    assert res is not None
+    assert res["error"] == "no_recent_posts_known"
+    assert res["rejected_id"] == 12345
+    assert res["ok"] is False
+
+
+def test_validate_comment_msg_id_rejects_hallucination():
+    from tg_promo_agent.agent import Agent
+    posts = [{"id": 4421, "text": "..."}, {"id": 4420, "text": "..."}]
+    res = Agent._validate_comment_message_id((123.0, posts), 12345)
+    assert res is not None
+    assert res["error"] == "hallucinated_message_id"
+    assert res["rejected_id"] == 12345
+    assert res["valid_recent_ids"] == [4420, 4421]
+
+
+def test_validate_comment_msg_id_accepts_known_id():
+    from tg_promo_agent.agent import Agent
+    posts = [{"id": 4421, "text": "..."}, {"id": 4420, "text": "..."}]
+    assert Agent._validate_comment_message_id((123.0, posts), 4420) is None
+
+
+def test_format_foreign_block_renders_real_ids():
+    from tg_promo_agent.agent import Agent
+
+    cfg = AppConfig(allowed_foreign_channels=["foo"])
+    agent = Agent.__new__(Agent)  # bypass full __init__; we only need the method
+    agent.cfg = cfg
+    block = agent._format_foreign_block(
+        {"foo": [{"id": 42, "text": "VR news drop\nApple Vision Pro 2"}]}
+    )
+    assert "@foo" in block
+    assert "[message_id=42]" in block
+    assert "VR news drop Apple Vision Pro 2" in block
+    # Newlines in body are flattened so the prompt stays one-line-per-msg.
+    assert "VR news drop\nApple Vision Pro" not in block
+
+
+def test_format_foreign_block_marks_dead_channel():
+    from tg_promo_agent.agent import Agent
+
+    agent = Agent.__new__(Agent)
+    agent.cfg = AppConfig(allowed_foreign_channels=["dead"])
+    block = agent._format_foreign_block({"dead": []})
+    assert "@dead" in block
+    assert "inaccessible" in block.lower() or "skip" in block.lower()
+
+
+async def test_refresh_foreign_messages_uses_cache(monkeypatch):
+    """Second call within TTL must NOT hit Telegram again."""
+    from tg_promo_agent.agent import Agent
+
+    cfg = AppConfig(allowed_foreign_channels=["alpha", "beta"])
+    agent = Agent.__new__(Agent)
+    agent.cfg = cfg
+    agent._foreign_msg_cache = {}
+
+    calls: list[str] = []
+
+    class FakeTG:
+        async def fetch_recent_messages(self, channel: str, limit: int):
+            calls.append(channel)
+            return [{"id": 1, "text": f"hi from {channel}"}]
+
+    agent.tg = FakeTG()  # type: ignore[assignment]
+
+    first = await agent._refresh_foreign_messages()
+    assert sorted(first.keys()) == ["alpha", "beta"]
+    assert calls == ["alpha", "beta"]
+
+    # Second call within TTL — should be served entirely from cache.
+    second = await agent._refresh_foreign_messages()
+    assert second == first
+    assert calls == ["alpha", "beta"]  # unchanged — no new TG calls
+
+
+async def test_refresh_foreign_messages_soft_fails_on_runtime_error():
+    """A disconnected TG client must not crash the tick — failures cache empty."""
+    from tg_promo_agent.agent import Agent
+
+    cfg = AppConfig(allowed_foreign_channels=["alpha"])
+    agent = Agent.__new__(Agent)
+    agent.cfg = cfg
+    agent._foreign_msg_cache = {}
+
+    class BrokenTG:
+        async def fetch_recent_messages(self, channel: str, limit: int):
+            raise RuntimeError("not connected")
+
+    agent.tg = BrokenTG()  # type: ignore[assignment]
+    out = await agent._refresh_foreign_messages()
+    assert out == {"alpha": []}
+    # Empty result is still cached so we don't retry every tick.
+    assert "alpha" in agent._foreign_msg_cache

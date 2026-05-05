@@ -84,7 +84,12 @@ class TelegramTools:
             return {"ok": False, "error": str(e)}
 
     async def fetch_recent_messages(self, channel: str, limit: int = 10) -> list[dict[str, Any]]:
-        client = self._require()
+        # Read-only helper: callers (notably the planner-prompt builder)
+        # invoke this every tick. If the TG client isn't connected (e.g.
+        # missing creds in dev), return [] instead of crashing the tick.
+        if self._client is None:
+            return []
+        client = self._client
         try:
             entity = await client.get_entity(channel)
             out: list[dict[str, Any]] = []
