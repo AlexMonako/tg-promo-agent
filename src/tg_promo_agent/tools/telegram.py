@@ -6,7 +6,7 @@ from typing import Any
 
 import structlog
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, RPCError
+from telethon.errors import AuthKeyDuplicatedError, FloodWaitError, RPCError
 from telethon.sessions import StringSession
 from telethon.tl.types import Channel, Chat, User
 
@@ -19,20 +19,58 @@ class TelegramTools:
         self._api_hash = api_hash
         self._session = StringSession(session_string) if session_string else StringSession()
         self._client: TelegramClient | None = None
+        # Set when Telegram returns AUTH_KEY_DUPLICATED — i.e. our session was
+        # used from two IPs simultaneously and Telegram revoked the key
+        # permanently. Retrying connect() is futile; the operator must
+        # regenerate via scripts/login.py and update TELEGRAM_SESSION_STRING.
+        # Surfaced to the rest of the agent via `is_session_revoked` so the
+        # bot can keep /health alive instead of crashing the whole process.
+        self._session_revoked: bool = False
+
+    @property
+    def is_session_revoked(self) -> bool:
+        return self._session_revoked
 
     async def connect(self) -> None:
         if self._client is not None and self._client.is_connected():
             return
+        if self._session_revoked:
+            # Don't burn through reconnect attempts on a dead session.
+            return
         if not self._api_id or not self._api_hash:
             log.warning("telegram.no_credentials")
             return
-        self._client = TelegramClient(self._session, self._api_id, self._api_hash)
-        await self._client.connect()
-        if not await self._client.is_user_authorized():
-            log.error("telegram.not_authorized",
-                      hint="run scripts/login.py locally and set TELEGRAM_SESSION_STRING")
-            await self._client.disconnect()
-            self._client = None
+        # Build the client locally and only commit it to self._client after
+        # we've verified the connection + auth succeeded — otherwise a
+        # half-broken client lingers and confuses callers that gate on
+        # `_client is None`.
+        client = TelegramClient(self._session, self._api_id, self._api_hash)
+        try:
+            await client.connect()
+        except AuthKeyDuplicatedError:
+            log.error(
+                "telegram.session_revoked",
+                hint=(
+                    "AUTH_KEY_DUPLICATED — session was used from two IPs at "
+                    "once and Telegram revoked it. Regenerate locally via "
+                    "`python -m tg_promo_agent.scripts.login` and update "
+                    "TELEGRAM_SESSION_STRING on Railway."
+                ),
+            )
+            self._session_revoked = True
+            try:
+                await client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        if not await client.is_user_authorized():
+            log.error(
+                "telegram.not_authorized",
+                hint="run scripts/login.py locally and set TELEGRAM_SESSION_STRING",
+            )
+            await client.disconnect()
+            return
+        self._client = client
 
     async def disconnect(self) -> None:
         if self._client is not None:

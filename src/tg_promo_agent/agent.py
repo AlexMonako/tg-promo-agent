@@ -315,6 +315,18 @@ class Agent:
     async def start(self) -> None:
         await self.store.init()
         await self.tg.connect()
+        if self.tg.is_session_revoked:
+            # Don't crash the process — keep /health alive so the operator
+            # can see the problem and regenerate the session.
+            self._last_status = {
+                "state": "tg_session_revoked",
+                "hint": (
+                    "Telegram revoked the session (AUTH_KEY_DUPLICATED). "
+                    "Regenerate via scripts/login.py and update "
+                    "TELEGRAM_SESSION_STRING on Railway, then redeploy."
+                ),
+            }
+            return
         self._last_status = {"state": "running", "dry_run": self.cfg.dry_run}
 
     async def stop(self) -> None:
@@ -339,6 +351,15 @@ class Agent:
             await self.stop()
 
     async def tick(self) -> None:
+        # Short-circuit when the TG session is dead: no point planning, no
+        # point burning Groq tokens, no point hitting telethon. Keep /health
+        # reporting the revoked state so the operator notices.
+        if self.tg.is_session_revoked:
+            self._last_status = {
+                "state": "tg_session_revoked",
+                "hint": "regenerate TELEGRAM_SESSION_STRING via scripts/login.py",
+            }
+            return
         recent = await self.store.recent_actions(limit=20)
         memory = "\n".join(
             f"- [{a['tool']}] target={a['target']} dry_run={a['dry_run']} "

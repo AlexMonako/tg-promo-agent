@@ -27,9 +27,13 @@ own_channels:
     can_post: true
 
 policy:
-  max_own_channel_posts_per_day: 3
-  max_comments_per_day: 15
-  max_dms_per_day: 5
+  # Conservative caps for the first 3 days of live posting. Telegram's
+  # antifraud is most jumpy when a previously-quiet user account suddenly
+  # starts authoring 15 comments/day. After ~3 days of clean live activity
+  # we can raise to: posts_per_day 3, comments_per_day 15.
+  max_own_channel_posts_per_day: 2
+  max_comments_per_day: 5
+  max_dms_per_day: 0
   min_minutes_between_same_tool: 30
   min_minutes_between_same_foreign_channel: 360
   comment_blacklist_keywords:
@@ -46,21 +50,16 @@ policy:
     - tg_dm_channel_owner
 
 # Foreign channels the agent is allowed to comment under.
-# STARTER LIST — verify each one is alive + has comments enabled before trusting.
-# Niches: AI image/video generation + VR (RU). Remove any that turn out to be
-# inactive, off-topic, or spammy after a day of dry-run observation.
+# Pruned 2026-05-08 after 24h dry-run: kept only the 3 channels that the
+# planner actually used + that returned real posts via fetch_recent_messages.
+# Removed (zero activity in 24h, likely no discussion group / wrong username
+# / inactive): ai_newz, bogdanisssimo, nn_for_science, vrgeek, xrtoday_ru,
+# vr_chat_ru. Re-add manually after verifying each is live + has comments
+# enabled.
 allowed_foreign_channels:
-  # AI / нейросети (RU)
   - "denissexy"
   - "cgevent"
   - "neural"
-  - "ai_newz"
-  - "bogdanisssimo"
-  - "nn_for_science"
-  # VR / XR (RU)
-  - "vrgeek"
-  - "xrtoday_ru"
-  - "vr_chat_ru"
 
 cross_post:
   twitter:

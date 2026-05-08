@@ -234,3 +234,73 @@ async def test_refresh_foreign_messages_soft_fails_on_runtime_error():
     assert out == {"alpha": []}
     # Empty result is still cached so we don't retry every tick.
     assert "alpha" in agent._foreign_msg_cache
+
+
+# --- AuthKeyDuplicatedError graceful handling -----------------------------
+
+
+async def test_telegram_connect_handles_authkey_duplicated():
+    """connect() must not raise on AuthKeyDuplicatedError — sets a flag instead.
+
+    Otherwise the exception propagates up and crashes the whole uvicorn
+    process, taking /health down with it (which is exactly what hid the
+    problem from the operator the first time we hit it).
+    """
+    from telethon.errors import AuthKeyDuplicatedError
+
+    from tg_promo_agent.tools.telegram import TelegramTools
+
+    tools = TelegramTools(api_id=12345, api_hash="hash", session_string="")
+
+    # Replace the TelegramClient ctor with a fake whose .connect() raises
+    # the exception we care about. We patch on the module the import lives
+    # on so `TelegramClient(...)` inside connect() returns our fake.
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def connect(self):
+            raise AuthKeyDuplicatedError(request=None)
+
+        async def disconnect(self):
+            pass
+
+    import tg_promo_agent.tools.telegram as tg_mod
+
+    real = tg_mod.TelegramClient
+    tg_mod.TelegramClient = FakeClient  # type: ignore[assignment]
+    try:
+        await tools.connect()  # must NOT raise
+    finally:
+        tg_mod.TelegramClient = real  # type: ignore[assignment]
+
+    assert tools.is_session_revoked is True
+    # _client must remain None so callers gating on it short-circuit.
+    assert tools._client is None
+
+
+async def test_agent_tick_short_circuits_on_revoked_session():
+    """Tick must not call LLM / fetch / log when session is revoked."""
+    from tg_promo_agent.agent import Agent
+
+    cfg = AppConfig(allowed_foreign_channels=["alpha"])
+    agent = Agent.__new__(Agent)
+    agent.cfg = cfg
+    agent._last_status = {}
+
+    class RevokedTG:
+        is_session_revoked = True
+
+        async def fetch_recent_messages(self, channel: str, limit: int):
+            raise AssertionError("must not be called when session revoked")
+
+    class ExplodingLLM:
+        async def plan(self, *a, **kw):
+            raise AssertionError("must not be called when session revoked")
+
+    agent.tg = RevokedTG()  # type: ignore[assignment]
+    agent.llm = ExplodingLLM()  # type: ignore[assignment]
+    # No store / policy / cache assigned — tick must early-return before
+    # touching them.
+    await agent.tick()
+    assert agent._last_status["state"] == "tg_session_revoked"
